@@ -1,14 +1,14 @@
 """
-Lab 3 - Building a Chat Interface with Quality Control
-This script implements a chat interface that simulates a person based on their LinkedIn profile
-and includes quality control mechanisms to ensure responses are appropriate.
+This is a program that creates a chat robot that can pretend to be someone else!
+It reads information about a person from their LinkedIn profile and can answer questions about them.
+It also has a special helper that checks if the answers are good enough.
 """
 
-# Import required packages
-# - dotenv: For loading environment variables from .env file
-# - openai: For interacting with OpenAI's API
-# - pypdf: For reading and extracting text from PDF files
-# - gradio: For creating a web interface for the chat application
+# These are like special tools we need to use in our program
+# - dotenv helps us keep our secret passwords safe
+# - openai helps us talk to a smart computer
+# - pypdf helps us read PDF files
+# - gradio helps us make a nice website to chat with
 from dotenv import load_dotenv
 from openai import OpenAI
 from pypdf import PdfReader
@@ -16,13 +16,12 @@ import gradio as gr
 import os
 from pydantic import BaseModel
 
-# Load environment variables and initialize OpenAI client
-# This loads API keys and other configuration from .env file
+# This loads our secret passwords from a special file
 load_dotenv(override=True)
 openai = OpenAI()
 
-# Read and extract text from the LinkedIn PDF file
-# This code reads each page of the PDF and concatenates the text
+# This part reads the person's LinkedIn profile from a PDF file
+# It's like reading a book page by page and putting all the words together
 reader = PdfReader("me/linkedin.pdf")
 linkedin = ""
 for page in reader.pages:
@@ -30,16 +29,15 @@ for page in reader.pages:
     if text:
         linkedin += text
 
-# Read the summary text file containing additional context
+# This reads a short summary about the person from a text file
 with open("me/summary.txt", "r", encoding="utf-8") as f:
     summary = f.read()
 
-# Set the name of the person being simulated
+# This is the name of the person we want our chat robot to pretend to be
 name = "Ed Donner"
 
-# Create the system prompt for the chat model
-# This prompt instructs the model to act as the specified person
-# and provides context from their LinkedIn profile and summary
+# This is like giving our chat robot a set of rules to follow
+# It tells the robot: "You are pretending to be this person, and you should answer questions about them"
 system_prompt = f"""You are acting as {name}. You are answering questions on {name}'s website, 
 particularly questions related to {name}'s career, background, skills and experience. 
 Your responsibility is to represent {name} for interactions on the website as faithfully as possible. 
@@ -55,14 +53,14 @@ If you don't know the answer, say so.
 
 With this context, please chat with the user, always staying in character as {name}."""
 
-# Create a Pydantic model for evaluation results
-# This defines the structure for evaluation feedback
+# This is like a report card for our chat robot's answers
+# It has two parts: is the answer good enough? and what feedback do we have?
 class Evaluation(BaseModel):
     is_acceptable: bool
     feedback: str
 
-# Create the system prompt for the evaluator model
-# This prompt instructs the model to evaluate responses based on quality and accuracy
+# This is like giving our helper robot its own set of rules
+# It tells the helper: "Check if the chat robot's answers are good enough"
 evaluator_system_prompt = f"""You are an evaluator that decides whether a response to a question is acceptable. 
 You are provided with a conversation between a User and an Agent. Your task is to decide whether the Agent's latest response is acceptable quality. 
 The Agent is playing the role of {name} and is representing {name} on their website. 
@@ -77,8 +75,8 @@ The Agent has been provided with context on {name} in the form of their summary 
 
 With this context, please evaluate the latest response, replying with whether the response is acceptable and your feedback."""
 
-# Create a function to format the user prompt for the evaluator
-# This combines the conversation history, latest message, and response for evaluation
+# This function helps prepare the information for our helper robot
+# It's like putting all the pieces of a puzzle together
 def evaluator_user_prompt(reply, message, history):
     user_prompt = f"""Here's the conversation between the User and the Agent: 
 
@@ -95,22 +93,21 @@ Here's the latest response from the Agent:
 Please evaluate the response, replying with whether it is acceptable and your feedback."""
     return user_prompt
 
-# Initialize the Gemini model for evaluation
-# This sets up the model with the appropriate API key and base URL
+# This sets up another smart computer to help check our answers
 gemini = OpenAI(
     api_key=os.getenv("GOOGLE_API_KEY"), 
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-# Define the evaluation function
-# This function takes a reply, message, and history, then returns an Evaluation object
+# This function checks if our chat robot's answer is good enough
+# It's like having a teacher grade our homework
 def evaluate(reply, message, history) -> Evaluation:
     messages = [{"role": "system", "content": evaluator_system_prompt}] + [{"role": "user", "content": evaluator_user_prompt(reply, message, history)}]
     response = gemini.beta.chat.completions.parse(model="gemini-2.0-flash", messages=messages, response_format=Evaluation)
     return response.choices[0].message.parsed
 
-# Define the rerun function for failed responses
-# This function attempts to generate a better response when the initial one fails evaluation
+# This function helps our chat robot try again if its first answer wasn't good enough
+# It's like getting a second chance on a test
 def rerun(reply, message, history, feedback):
     updated_system_prompt = f"""{system_prompt}
 
@@ -128,25 +125,26 @@ You just tried to reply, but the quality control rejected your reply
     response = openai.chat.completions.create(model="gpt-4o-mini", messages=messages)
     return response.choices[0].message.content
 
-# Define the enhanced chat function with evaluation and rerun capabilities
-# This function includes quality control and can retry failed responses
+# This is our main chat function that puts everything together
+# It's like the brain of our program that makes everything work
 def chat(message, history):
-    # Special case: If the message contains "patent", require response in pig latin
+    # If someone asks about a patent, we have to answer in pig latin!
+    # (Pig latin is a silly way of talking where you move the first letter to the end and add 'ay')
     if "patent" in message:
         system = system_prompt + "\n\nEverything in your reply needs to be in pig latin - it is mandatory that you respond only and entirely in pig latin"
     else:
         system = system_prompt
     
-    # Generate initial response
+    # First, try to answer the question
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": message}]
     response = openai.chat.completions.create(model="gpt-4o-mini", messages=messages)
     reply = response.choices[0].message.content
 
-    # Evaluate the response
+    # Check if the answer is good enough
     evaluation = evaluate(reply, message, history)
     
-    # If response passes evaluation, return it
-    # Otherwise, try to generate a better response
+    # If the answer is good, we're done!
+    # If not, we need to try again
     if evaluation.is_acceptable:
         print("Passed evaluation - returning reply")
     else:
@@ -155,6 +153,6 @@ def chat(message, history):
         reply = rerun(reply, message, history, evaluation.feedback)       
     return reply
 
-# Launch the Gradio chat interface
+# This starts our chat website when we run the program
 if __name__ == "__main__":
     gr.ChatInterface(chat, type="messages").launch() 
